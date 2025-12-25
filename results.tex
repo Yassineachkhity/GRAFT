@@ -1,0 +1,229 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+
+\title{GRAFT Implementation Report and Coding Task Evaluation}
+\author{Project Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents the implemented GRAFT framework, its software structure,
+and the evaluation on real coding tasks. The system integrates plan ensembles,
+online graph selection, failure-aware reward shaping, and sparse communication.
+We evaluate single-agent vs multi-agent execution on a suite of Python coding
+tasks using the Mistral API as the LLM backend. The report covers environment
+setup, reward design, task definitions, evaluation methodology, and the
+resulting metrics and visualizations.
+\end{abstract}
+
+\section{Project Overview}
+GRAFT (Failure-Aware Graph Ensembles for Reliable LLM-Guided MARL) is a framework
+for robust multi-agent coordination when LLM-generated plans may be uncertain.
+This implementation provides:
+\begin{itemize}
+  \item Plan ensembles and online graph selection (Exp3 bandit).
+  \item Failure-aware process rewards with reward shaping.
+  \item Graph-aligned, gated communication.
+  \item A structured training loop and runnable demos.
+  \item A real-code benchmark that evaluates generated code against unit tests.
+\end{itemize}
+
+The codebase is organized under the \texttt{graft/} package, with demos and
+experiments under \texttt{examples/} and \texttt{experiments/}.
+
+\section{Implementation Structure}
+\subsection{Core Components}
+\begin{itemize}
+  \item \textbf{Graph modeling:} \texttt{graft/graphs.py} defines
+  \texttt{SubtaskGraph} and \texttt{GraphState}. Dependencies are DAGs and are
+  validated for cycles.
+  \item \textbf{Planner:} \texttt{graft/planner.py} implements a
+  \texttt{LocalLLMPlanner} and LLM clients. The planner requests a JSON ensemble
+  of subtask graphs and parses them into DAGs.
+  \item \textbf{Bandit selection:} \texttt{graft/bandit.py} implements Exp3 to
+  select a graph per episode/task based on observed performance.
+  \item \textbf{Failure shaping:} \texttt{graft/failure.py} defines failure
+  labels, a process reward shaper, and a distilled critic (linear model).
+  \item \textbf{Communication:} \texttt{graft/communication.py} restricts
+  messaging to graph edges and applies gating to reduce overhead.
+  \item \textbf{Training loop:} \texttt{graft/training.py} orchestrates all
+  components and records episode-level metrics.
+\end{itemize}
+
+\subsection{Real Coding Task Benchmark}
+The real coding tasks are defined in
+\texttt{graft/benchmarks/real_code_tasks.py} and evaluated via a safe execution
+wrapper using a separate process and timeout. Tasks include:
+\begin{itemize}
+  \item Palindrome check
+  \item Two-sum indices
+  \item Valid parentheses
+  \item FizzBuzz
+  \item Rotate array
+  \item Merge intervals
+\end{itemize}
+Each task specifies a function signature and unit tests. Generated code is
+executed and validated against tests, with explicit status labels for failures
+(compile error, runtime error, missing function, timeout).
+
+\section{Environment and Dependencies}
+\subsection{Runtime Environment}
+\begin{itemize}
+  \item OS: Windows
+  \item Python: 3.x (tested on the local environment used for execution)
+  \item Execution uses local file outputs in \texttt{runs/}
+\end{itemize}
+
+\subsection{Key Dependencies}
+\begin{itemize}
+  \item \texttt{requests} for Mistral API calls
+  \item \texttt{python-dotenv} for environment variables
+  \item \texttt{numpy} and \texttt{matplotlib} for metrics and plots
+\end{itemize}
+
+\subsection{LLM Backend}
+The LLM used for planning and code generation is \textbf{Mistral} via API key.
+The configuration is loaded from \texttt{.env} and uses:
+\begin{itemize}
+  \item \texttt{MISTRAL\_API\_KEY} (required)
+  \item \texttt{MISTRAL\_MODEL} (default: \texttt{mistral-small-latest})
+  \item \texttt{MISTRAL\_ENDPOINT} (default: \texttt{https://api.mistral.ai/v1/chat/completions})
+\end{itemize}
+The code never stores the API key in the repository; \texttt{.env} is ignored,
+and \texttt{.env.example} provides a template.
+
+\section{Reward Design}
+\subsection{Failure-Aware Process Reward}
+The process reward is computed from a failure taxonomy and progress signals:
+\begin{itemize}
+  \item \textbf{Progress:} fraction of tests passed.
+  \item \textbf{Failure modes:} compile error, runtime error, missing function,
+  and timeout.
+\end{itemize}
+For a task result with progress $p$ and failure flags $y_f$, the shaped reward is:
+\[
+r_{\text{proc}} = p - \sum_f w_f y_f
+\]
+where $w_f$ are per-failure weights. This reward is then normalized into
+$[0, 1]$ for the Exp3 update.
+
+\subsection{Graph Selection}
+GRAFT treats each candidate dependency graph as a bandit arm. After each task,
+the Exp3 bandit updates its weights using the shaped reward. This encourages
+selection of the graph structure that yields higher test pass rates.
+
+\section{Experiment Setup}
+\subsection{Single-Agent Baseline}
+For each task, the LLM is prompted once to implement the solution. The output
+is evaluated directly.
+
+\subsection{Multi-Agent GRAFT Mode}
+For each task, GRAFT chooses one of three graphs:
+\begin{itemize}
+  \item \textbf{Full:} analyze $\rightarrow$ implement $\rightarrow$ review
+  \item \textbf{Fast:} implement $\rightarrow$ review
+  \item \textbf{Minimal:} implement only
+\end{itemize}
+Each node corresponds to one LLM call. Messages passed between nodes constitute
+communication edges. The final code is evaluated against the test suite.
+
+\section{Results}
+The experiment outputs metrics to:
+\begin{itemize}
+  \item \texttt{runs/real\_code/single\_agent\_tasks.csv}
+  \item \texttt{runs/real\_code/multi\_agent\_tasks.csv}
+  \item \texttt{runs/real\_code/summary.json}
+  \item \texttt{runs/real\_code/comparison.png}
+\end{itemize}
+
+\subsection{Summary Metrics}
+Table~\ref{tab:summary} summarizes the results from the latest run.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Setting & Success Rate & Avg Test Pass Rate & Avg LLM Calls & Avg Comm Messages \\
+\midrule
+Single-agent & 1.00 & 1.00 & 1.00 & 0.00 \\
+Multi-agent (GRAFT) & 1.00 & 1.00 & 1.83 & 0.83 \\
+\bottomrule
+\end{tabular}
+\caption{Real coding task evaluation results.}
+\label{tab:summary}
+\end{table}
+
+\subsection{Visualization}
+Figure~\ref{fig:comparison} compares success rate and test pass rate between
+single-agent and multi-agent settings.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{runs/real_code/comparison.png}
+\caption{Comparison of success rate and test pass rate.}
+\label{fig:comparison}
+\end{figure}
+
+\section{GRAFT vs CoMLRL Comparison}
+We also compared GRAFT against a CoMLRL-style collaborative baseline on the
+same real coding tasks. The CoMLRL baseline uses two agents: one writes a helper
+function \texttt{aux}, and the second writes the main function. We compute a
+CoMLRL-inspired reward that measures function definition quality, syntax
+correctness, test pass rate, and helper usage bonuses.
+
+Outputs are stored under:
+\begin{itemize}
+  \item \texttt{runs/graft\_vs\_comlrl/graft\_metrics.csv}
+  \item \texttt{runs/graft\_vs\_comlrl/comlrl\_metrics.csv}
+  \item \texttt{runs/graft\_vs\_comlrl/summary.json}
+  \item \texttt{runs/graft\_vs\_comlrl/comparison.png}
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+Setting & Success Rate & Avg Test Pass Rate & Avg LLM Calls & Avg Comm & Avg CoMLRL Reward \\
+\midrule
+GRAFT & 1.00 & 1.00 & 1.83 & 0.83 & 0.00 \\
+CoMLRL-style & 1.00 & 1.00 & 2.00 & 1.00 & 2.75 \\
+\bottomrule
+\end{tabular}
+\caption{GRAFT vs CoMLRL-style comparison on real coding tasks.}
+\label{tab:comlrl}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\linewidth]{runs/graft_vs_comlrl/comparison.png}
+\caption{GRAFT vs CoMLRL-style comparison plot.}
+\label{fig:comlrl}
+\end{figure}
+
+\section{Discussion}
+Both approaches solved all tasks in this benchmark. The multi-agent setup
+incurs additional LLM calls and communication overhead because of the
+analyze/review steps. The Exp3 bandit and failure-aware shaping provide a
+framework for selecting the most efficient graph as tasks scale in difficulty.
+
+While this benchmark is small, it establishes a reproducible evaluation
+pipeline for future task suites with more complex logic, larger test sets, or
+performance constraints.
+
+\section{Reproducibility}
+To reproduce:
+\begin{enumerate}
+  \item Install dependencies: \texttt{pip install -r requirements.txt}
+  \item Configure \texttt{.env} with Mistral API settings.
+  \item Run: \texttt{python experiments/compare\_real\_code\_tasks.py}
+\end{enumerate}
+Outputs are stored under \texttt{runs/real\_code/}.
+
+\end{document}

@@ -86,3 +86,11 @@ python experiments/compare_real_code_tasks.py
 ```
 
 This script logs per-task metrics to `runs/real_code/` and saves a plot.
+
+For a direct comparison between GRAFT and a CoMLRL-style collaborative baseline:
+
+```
+python experiments/compare_graft_vs_comlrl.py
+```
+
+This script logs metrics to `runs/graft_vs_comlrl/` and saves a comparison plot.
