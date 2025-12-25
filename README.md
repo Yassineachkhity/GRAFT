@@ -37,7 +37,7 @@ is provided for plugging in an open-source model installed on your machine.
 pip install -r requirements.txt
 ```
 
-2) Configure Gemini
+2) Configure Mistral
 
 Copy the env template and add your API key:
 
@@ -45,8 +45,8 @@ Copy the env template and add your API key:
 copy .env.example .env
 ```
 
-Edit `.env` to set `GEMINI_API_KEY` and optionally `GEMINI_MODEL` (default:
-`gemini-2.5-flash`) plus `GEMINI_API_VERSION` (default: `v1`).
+Edit `.env` to set `MISTRAL_API_KEY` and optionally `MISTRAL_MODEL` and
+`MISTRAL_ENDPOINT`.
 
 3) Run the toy demo
 
@@ -61,6 +61,7 @@ python examples/run_toy.py
 - `LocalLLMPlanner` which expects a local HF model path and uses `transformers`
   if installed. This is optional and not required for the toy demo.
 - `GeminiLLMClient` for using the Gemini API via `google-genai`
+- `MistralLLMClient` for using the Mistral API via `requests`
 
 ## Extending
 

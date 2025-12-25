@@ -253,6 +253,56 @@ class GeminiLLMClient(LLMClient):
         return "response_mime_type" in text or "mime" in text
 
 
+class MistralLLMClient(LLMClient):
+    """
+    Mistral client using the REST API with an API key.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "mistral-small-latest",
+        endpoint: str = "https://api.mistral.ai/v1/chat/completions",
+        timeout: int = 60,
+    ):
+        self.api_key = api_key
+        self.model = model
+        self.endpoint = endpoint
+        self.timeout = timeout
+
+    def generate(self, prompt: str) -> str:
+        try:
+            import requests
+        except ImportError as exc:
+            raise ImportError("requests is required for MistralLLMClient") from exc
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 800,
+        }
+        response = requests.post(
+            self.endpoint, headers=headers, json=payload, timeout=self.timeout
+        )
+        if response.status_code != 200:
+            raise ValueError(
+                f"Mistral API error {response.status_code}: {response.text}"
+            )
+        data = response.json()
+        choices = data.get("choices", [])
+        if not choices:
+            raise ValueError("Mistral response contained no choices")
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if not content:
+            raise ValueError("Mistral response contained no content")
+        return content
+
+
 @dataclass
 class LocalLLMPlanner(Planner):
     """

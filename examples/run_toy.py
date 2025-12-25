@@ -20,29 +20,37 @@ from graft.failure import (
     ProcessRewardShaper,
 )
 from graft.marl import IndependentQLearner, SimpleStateEncoder
-from graft.planner import GeminiLLMClient, LocalLLMPlanner
+from graft.planner import LocalLLMPlanner, MistralLLMClient
 from graft.training import GRAFTTrainer
 
 
-def load_gemini_config() -> tuple[str, str, str]:
+def load_mistral_config() -> tuple[str, str, str]:
     env_path = Path(__file__).resolve().parents[1] / ".env"
     load_dotenv(env_path)
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("MISTRAL_API_KEY") or os.getenv("MISRAL_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "GEMINI_API_KEY not set. Copy .env.example to .env and add your key."
+            "MISTRAL_API_KEY not set. Copy .env.example to .env and add your key."
         )
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    api_version = os.getenv("GEMINI_API_VERSION", "v1")
-    return api_key, model, api_version
+    model = (
+        os.getenv("MISTRAL_MODEL")
+        or os.getenv("MISRAL_MODEL")
+        or "mistral-small-latest"
+    )
+    endpoint = (
+        os.getenv("MISTRAL_ENDPOINT")
+        or os.getenv("MISRAL_ENDPOINT")
+        or "https://api.mistral.ai/v1/chat/completions"
+    )
+    return api_key, model, endpoint
 
 
 def main() -> None:
     task = build_demo_task()
     env = ToyMultiAgentEnv(task_spec=task, max_steps=40, seed=7)
 
-    api_key, model, api_version = load_gemini_config()
-    client = GeminiLLMClient(api_key=api_key, model=model, api_version=api_version)
+    api_key, model, endpoint = load_mistral_config()
+    client = MistralLLMClient(api_key=api_key, model=model, endpoint=endpoint)
     planner = LocalLLMPlanner(client=client, ensemble_size=4)
     bandit = Exp3Bandit(num_arms=planner.ensemble_size, gamma=0.2, seed=7)
 
