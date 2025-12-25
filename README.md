@@ -78,3 +78,11 @@ python experiments/compare_code_tasks.py
 ```
 
 This script logs metrics to `runs/` and saves a comparison plot.
+
+For a more realistic evaluation where the LLM writes full solutions:
+
+```
+python experiments/compare_real_code_tasks.py
+```
+
+This script logs per-task metrics to `runs/real_code/` and saves a plot.
