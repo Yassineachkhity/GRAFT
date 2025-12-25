@@ -37,7 +37,17 @@ is provided for plugging in an open-source model installed on your machine.
 pip install -r requirements.txt
 ```
 
-2) Run the toy demo
+2) Configure Gemini
+
+Copy the env template and add your API key:
+
+```
+copy .env.example .env
+```
+
+Edit `.env` to set `GEMINI_API_KEY`.
+
+3) Run the toy demo
 
 ```
 python examples/run_toy.py
@@ -49,6 +59,7 @@ python examples/run_toy.py
 - `MockPlanner` for offline development and testing
 - `LocalLLMPlanner` which expects a local HF model path and uses `transformers`
   if installed. This is optional and not required for the toy demo.
+- `GeminiLLMClient` for using the Gemini API via `google-generativeai`
 
 ## Extending
 
@@ -56,3 +67,12 @@ python examples/run_toy.py
 - Replace `HeuristicFailureJudge` with an LLM or tool-based judge.
 - Swap in your MARL algorithm inside `marl.py` while keeping the GRAFT trainer.
 
+## Experiments
+
+For a simple single-agent vs multi-agent comparison on coding tasks, run:
+
+```
+python experiments/compare_code_tasks.py
+```
+
+This script logs metrics to `runs/` and saves a comparison plot.

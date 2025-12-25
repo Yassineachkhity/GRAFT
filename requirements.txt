@@ -1,1 +1,4 @@
+google-generativeai>=0.4.1
+matplotlib>=3.7
 numpy>=1.24
+python-dotenv>=1.0

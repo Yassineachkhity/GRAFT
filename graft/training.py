@@ -27,6 +27,9 @@ class EpisodeMetrics:
     episode: int
     total_return: float
     normalized_return: float
+    steps: int
+    completion_ratio: float
+    comm_cost: float
 
 
 class GRAFTTrainer:
@@ -74,16 +77,21 @@ class GRAFTTrainer:
             graph_state = GraphState(active_graph)
             obs_by_agent = self.env.reset()
             total_return = 0.0
+            total_comm_cost = 0.0
+            last_info: Optional[Dict] = None
+            step = -1
 
             for step in range(self.train_config.max_steps):
                 graph_state_before = graph_state.copy()
                 messages_by_agent, comm_cost = self.communicator.compute_messages(
                     obs_by_agent, graph_state
                 )
+                total_comm_cost += comm_cost
                 actions_by_agent = self.algorithm.select_actions(
                     obs_by_agent, messages_by_agent, graph_state
                 )
                 step_result = self.env.step(actions_by_agent)
+                last_info = step_result.info
                 for subtask_id in step_result.info.get("completed", []):
                     graph_state.mark_completed(subtask_id)
 
@@ -130,11 +138,18 @@ class GRAFTTrainer:
 
             normalized = self._normalize_return(total_return)
             self.bandit.update(graph_index, normalized)
+            completion_ratio = float(
+                (last_info or {}).get("progress", graph_state.completion_ratio())
+            )
+            steps = step + 1
             metrics.append(
                 EpisodeMetrics(
                     episode=episode,
                     total_return=total_return,
                     normalized_return=normalized,
+                    steps=steps,
+                    completion_ratio=completion_ratio,
+                    comm_cost=total_comm_cost,
                 )
             )
             if self.train_config.verbose and (episode + 1) % 10 == 0:

@@ -2,6 +2,11 @@
 Minimal runnable demo of GRAFT on the toy environment.
 """
 
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
 from graft.bandit import Exp3Bandit
 from graft.communication import GateController, GraphAlignedCommunicator, SimpleMessageEncoder
 from graft.config import CommConfig, FailureConfig, TrainConfig
@@ -15,15 +20,28 @@ from graft.failure import (
     ProcessRewardShaper,
 )
 from graft.marl import IndependentQLearner, SimpleStateEncoder
-from graft.planner import MockPlanner
+from graft.planner import GeminiLLMClient, LocalLLMPlanner
 from graft.training import GRAFTTrainer
+
+
+def load_api_key() -> str:
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    load_dotenv(env_path)
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY not set. Copy .env.example to .env and add your key."
+        )
+    return api_key
 
 
 def main() -> None:
     task = build_demo_task()
     env = ToyMultiAgentEnv(task_spec=task, max_steps=40, seed=7)
 
-    planner = MockPlanner(ensemble_size=4, noise_prob=0.3, seed=7)
+    api_key = load_api_key()
+    client = GeminiLLMClient(api_key=api_key, model="gemini-1.5-flash")
+    planner = LocalLLMPlanner(client=client, ensemble_size=4)
     bandit = Exp3Bandit(num_arms=planner.ensemble_size, gamma=0.2, seed=7)
 
     failure_config = FailureConfig()

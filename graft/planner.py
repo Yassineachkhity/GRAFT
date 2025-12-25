@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from graft.graphs import SubtaskGraph, SubtaskNode
-from graft.types import SubtaskSpec, TaskSpec
+from graft.types import TaskSpec
 from graft.utils import set_seed
 
 
@@ -128,6 +128,37 @@ class HFLocalLLMClient(LLMClient):
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
+class GeminiLLMClient(LLMClient):
+    """
+    Gemini client using google-generativeai with an API key from the environment.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-1.5-flash",
+        response_mime_type: str = "application/json",
+    ):
+        try:
+            import google.generativeai as genai
+        except ImportError as exc:
+            raise ImportError(
+                "google-generativeai is required for GeminiLLMClient"
+            ) from exc
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model)
+        self.response_mime_type = response_mime_type
+
+    def generate(self, prompt: str) -> str:
+        response = self.model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": self.response_mime_type},
+        )
+        if hasattr(response, "text") and response.text:
+            return response.text
+        raise ValueError("Gemini response contained no text")
+
+
 @dataclass
 class LocalLLMPlanner(Planner):
     """
@@ -155,6 +186,7 @@ class LocalLLMPlanner(Planner):
             f"Task: {task.description}\n"
             f"Subtasks:\n{subtasks}\n"
             f"Known dependencies (optional):\n{deps}\n\n"
+            "Use only the provided subtask ids. Do not invent new nodes.\n"
             "JSON format:\n"
             "[{\n"
             '  "nodes": [{"id": "t1", "desc": "...", "agent": 0}],\n'
@@ -170,19 +202,27 @@ class LocalLLMPlanner(Planner):
 
     def _parse_graphs(self, json_text: str, task: TaskSpec) -> List[SubtaskGraph]:
         data = json.loads(json_text)
+        base_nodes = {
+            s.subtask_id: SubtaskNode(
+                subtask_id=s.subtask_id,
+                description=s.description,
+                assigned_agent=s.assigned_agent,
+            )
+            for s in task.subtasks
+        }
         graphs = []
         for graph_dict in data:
-            nodes = []
-            for node in graph_dict.get("nodes", []):
-                nodes.append(
-                    SubtaskNode(
-                        subtask_id=node["id"],
-                        description=node.get("desc", ""),
-                        assigned_agent=node.get("agent"),
-                    )
-                )
-            edges = [(e["from"], e["to"]) for e in graph_dict.get("edges", [])]
-            graphs.append(SubtaskGraph(nodes, edges))
+            nodes = list(base_nodes.values())
+            edges = []
+            for edge in graph_dict.get("edges", []):
+                src = edge.get("from")
+                dst = edge.get("to")
+                if src in base_nodes and dst in base_nodes:
+                    edges.append((src, dst))
+            try:
+                graphs.append(SubtaskGraph(nodes, edges))
+            except ValueError:
+                graphs.append(SubtaskGraph(nodes, task.dependencies))
         if not graphs:
             raise ValueError("No graphs parsed from LLM output")
         return graphs
