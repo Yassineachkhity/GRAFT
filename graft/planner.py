@@ -130,7 +130,7 @@ class HFLocalLLMClient(LLMClient):
 
 class GeminiLLMClient(LLMClient):
     """
-    Gemini client using google-generativeai with an API key from the environment.
+    Gemini client using the Google GenAI SDK with an API key.
     """
 
     def __init__(
@@ -141,15 +141,17 @@ class GeminiLLMClient(LLMClient):
         response_mime_type: str = "application/json",
     ):
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
             from google.api_core import exceptions as gexc
         except ImportError as exc:
             raise ImportError(
-                "google-generativeai is required for GeminiLLMClient"
+                "google-genai is required for GeminiLLMClient"
             ) from exc
-        genai.configure(api_key=api_key)
         self._genai = genai
+        self._types = types
         self._exceptions = gexc
+        self.client = genai.Client(api_key=api_key)
         self.model_name = model
         self.fallback_models = list(
             fallback_models
@@ -157,15 +159,18 @@ class GeminiLLMClient(LLMClient):
                 "gemini-2.5-flash-latest",
                 "gemini-2.0-flash",
                 "gemini-1.5-flash-latest",
-                "gemini-1.0-pro",
             ]
         )
+        self._model_list: Optional[List[str]] = None
         self.response_mime_type = response_mime_type
 
     def generate(self, prompt: str) -> str:
         model_names = [self.model_name] + [
             name for name in self.fallback_models if name != self.model_name
         ]
+        for name in self._get_model_list():
+            if name not in model_names:
+                model_names.append(name)
         last_exc: Optional[Exception] = None
         for model_name in model_names:
             try:
@@ -190,16 +195,20 @@ class GeminiLLMClient(LLMClient):
         raise ValueError("Gemini response contained no text")
 
     def _generate_with_model(self, model_name: str, prompt: str, use_mime: bool) -> str:
-        model = self._genai.GenerativeModel(model_name)
         if use_mime:
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": self.response_mime_type},
+            config = self._types.GenerateContentConfig(
+                response_mime_type=self.response_mime_type
+            )
+            response = self.client.models.generate_content(
+                model=model_name, contents=prompt, config=config
             )
         else:
-            response = model.generate_content(prompt)
-        if hasattr(response, "text") and response.text:
-            return response.text
+            response = self.client.models.generate_content(
+                model=model_name, contents=prompt
+            )
+        text = getattr(response, "text", None)
+        if text:
+            return text
         raise ValueError("Gemini response contained no text")
 
     def _is_retryable(self, exc: Exception) -> bool:
@@ -207,6 +216,27 @@ class GeminiLLMClient(LLMClient):
             return True
         text = str(exc).lower()
         return "not found" in text or "resourceexhausted" in text or "quota" in text
+
+    def _get_model_list(self) -> List[str]:
+        if self._model_list is not None:
+            return self._model_list
+        try:
+            models = list(self.client.models.list())
+        except Exception:
+            self._model_list = []
+            return self._model_list
+        available = []
+        for model in models:
+            methods = getattr(model, "supported_generation_methods", []) or []
+            if "generateContent" not in methods:
+                continue
+            name = getattr(model, "name", "")
+            if name.startswith("models/"):
+                name = name.split("/", 1)[1]
+            if name:
+                available.append(name)
+        self._model_list = available
+        return self._model_list
 
     def _is_mime_error(self, exc: Exception) -> bool:
         text = str(exc).lower()

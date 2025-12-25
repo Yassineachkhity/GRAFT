@@ -60,7 +60,7 @@ python examples/run_toy.py
 - `MockPlanner` for offline development and testing
 - `LocalLLMPlanner` which expects a local HF model path and uses `transformers`
   if installed. This is optional and not required for the toy demo.
-- `GeminiLLMClient` for using the Gemini API via `google-generativeai`
+- `GeminiLLMClient` for using the Gemini API via `google-genai`
 
 ## Extending
 
