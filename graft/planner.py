@@ -139,6 +139,7 @@ class GeminiLLMClient(LLMClient):
         model: str = "gemini-2.5-flash",
         fallback_models: Optional[Sequence[str]] = None,
         response_mime_type: str = "application/json",
+        api_version: str = "v1",
     ):
         try:
             from google import genai
@@ -151,7 +152,8 @@ class GeminiLLMClient(LLMClient):
         self._genai = genai
         self._types = types
         self._exceptions = gexc
-        self.client = genai.Client(api_key=api_key)
+        http_options = self._types.HttpOptions(api_version=api_version)
+        self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model_name = model
         self.fallback_models = list(
             fallback_models
