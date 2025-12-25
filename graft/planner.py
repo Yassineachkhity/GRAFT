@@ -177,11 +177,11 @@ class GeminiLLMClient(LLMClient):
                             model_name, prompt, use_mime=False
                         )
                     except Exception as exc2:
-                        if self._is_not_found(exc2):
+                        if self._is_retryable(exc2):
                             last_exc = exc2
                             continue
                         raise
-                if self._is_not_found(exc):
+                if self._is_retryable(exc):
                     last_exc = exc
                     continue
                 raise
@@ -202,8 +202,11 @@ class GeminiLLMClient(LLMClient):
             return response.text
         raise ValueError("Gemini response contained no text")
 
-    def _is_not_found(self, exc: Exception) -> bool:
-        return isinstance(exc, self._exceptions.NotFound) or "not found" in str(exc).lower()
+    def _is_retryable(self, exc: Exception) -> bool:
+        if isinstance(exc, (self._exceptions.NotFound, self._exceptions.ResourceExhausted)):
+            return True
+        text = str(exc).lower()
+        return "not found" in text or "resourceexhausted" in text or "quota" in text
 
     def _is_mime_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
@@ -218,12 +221,26 @@ class LocalLLMPlanner(Planner):
 
     client: LLMClient
     ensemble_size: int = 4
+    cache_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        self._cache = {}
 
     def plan(self, task: TaskSpec) -> List[SubtaskGraph]:
+        cache_key = None
+        if self.cache_enabled:
+            cache_key = self._cache_key(task)
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+
         prompt = self._build_prompt(task)
         raw = self.client.generate(prompt)
         payload = self._extract_json(raw)
-        return self._parse_graphs(payload, task)
+        graphs_payload = self._normalize_payload(payload)
+        graphs = self._parse_graphs(graphs_payload, task)
+        if self.cache_enabled and cache_key is not None:
+            self._cache[cache_key] = graphs
+        return graphs
 
     def _build_prompt(self, task: TaskSpec) -> str:
         subtasks = "\n".join(
@@ -245,14 +262,52 @@ class LocalLLMPlanner(Planner):
             "}]\n"
         )
 
-    def _extract_json(self, text: str) -> str:
-        match = re.search(r"\\[.*\\]", text, re.DOTALL)
-        if not match:
-            raise ValueError("LLM output does not contain a JSON array")
-        return match.group(0)
+    def _cache_key(self, task: TaskSpec) -> str:
+        payload = {
+            "task_id": task.task_id,
+            "description": task.description,
+            "subtasks": [
+                {
+                    "id": s.subtask_id,
+                    "desc": s.description,
+                    "agent": s.assigned_agent,
+                }
+                for s in task.subtasks
+            ],
+            "dependencies": sorted([list(dep) for dep in task.dependencies]),
+            "ensemble_size": self.ensemble_size,
+        }
+        return json.dumps(payload, sort_keys=True)
 
-    def _parse_graphs(self, json_text: str, task: TaskSpec) -> List[SubtaskGraph]:
-        data = json.loads(json_text)
+    def _extract_json(self, text: str):
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        decoder = json.JSONDecoder()
+        for idx, char in enumerate(text):
+            if char in "[{":
+                try:
+                    payload, _ = decoder.raw_decode(text[idx:])
+                    return payload
+                except json.JSONDecodeError:
+                    continue
+        raise ValueError("LLM output does not contain JSON data")
+
+    def _normalize_payload(self, payload):
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            if "graphs" in payload and isinstance(payload["graphs"], list):
+                return payload["graphs"]
+            if "plans" in payload and isinstance(payload["plans"], list):
+                return payload["plans"]
+            if "nodes" in payload:
+                return [payload]
+        raise ValueError("LLM JSON payload format not recognized")
+
+    def _parse_graphs(self, data, task: TaskSpec) -> List[SubtaskGraph]:
         base_nodes = {
             s.subtask_id: SubtaskNode(
                 subtask_id=s.subtask_id,
