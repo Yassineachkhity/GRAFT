@@ -184,11 +184,15 @@ class GeminiLLMClient(LLMClient):
                             model_name, prompt, use_mime=False
                         )
                     except Exception as exc2:
-                        if self._is_retryable(exc2):
+                        if self._is_quota_exceeded(exc2):
+                            raise exc2
+                        if self._is_not_found(exc2):
                             last_exc = exc2
                             continue
                         raise
-                if self._is_retryable(exc):
+                if self._is_quota_exceeded(exc):
+                    raise exc
+                if self._is_not_found(exc):
                     last_exc = exc
                     continue
                 raise
@@ -213,11 +217,15 @@ class GeminiLLMClient(LLMClient):
             return text
         raise ValueError("Gemini response contained no text")
 
-    def _is_retryable(self, exc: Exception) -> bool:
-        if isinstance(exc, (self._exceptions.NotFound, self._exceptions.ResourceExhausted)):
+    def _is_not_found(self, exc: Exception) -> bool:
+        if isinstance(exc, self._exceptions.NotFound):
             return True
-        text = str(exc).lower()
-        return "not found" in text or "resourceexhausted" in text or "quota" in text
+        return "not found" in str(exc).lower()
+
+    def _is_quota_exceeded(self, exc: Exception) -> bool:
+        if isinstance(exc, self._exceptions.ResourceExhausted):
+            return True
+        return "resource_exhausted" in str(exc).lower() or "quota" in str(exc).lower()
 
     def _get_model_list(self) -> List[str]:
         if self._model_list is not None:
