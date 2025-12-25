@@ -45,7 +45,8 @@ Copy the env template and add your API key:
 copy .env.example .env
 ```
 
-Edit `.env` to set `GEMINI_API_KEY`.
+Edit `.env` to set `GEMINI_API_KEY` and optionally `GEMINI_MODEL` (default:
+`gemini-2.5-flash`).
 
 3) Run the toy demo
 

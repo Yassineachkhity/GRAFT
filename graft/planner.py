@@ -136,27 +136,78 @@ class GeminiLLMClient(LLMClient):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-1.5-flash",
+        model: str = "gemini-2.5-flash",
+        fallback_models: Optional[Sequence[str]] = None,
         response_mime_type: str = "application/json",
     ):
         try:
             import google.generativeai as genai
+            from google.api_core import exceptions as gexc
         except ImportError as exc:
             raise ImportError(
                 "google-generativeai is required for GeminiLLMClient"
             ) from exc
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model)
+        self._genai = genai
+        self._exceptions = gexc
+        self.model_name = model
+        self.fallback_models = list(
+            fallback_models
+            or [
+                "gemini-2.5-flash-latest",
+                "gemini-2.0-flash",
+                "gemini-1.5-flash-latest",
+                "gemini-1.0-pro",
+            ]
+        )
         self.response_mime_type = response_mime_type
 
     def generate(self, prompt: str) -> str:
-        response = self.model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": self.response_mime_type},
-        )
+        model_names = [self.model_name] + [
+            name for name in self.fallback_models if name != self.model_name
+        ]
+        last_exc: Optional[Exception] = None
+        for model_name in model_names:
+            try:
+                return self._generate_with_model(model_name, prompt, use_mime=True)
+            except Exception as exc:
+                if self._is_mime_error(exc):
+                    try:
+                        return self._generate_with_model(
+                            model_name, prompt, use_mime=False
+                        )
+                    except Exception as exc2:
+                        if self._is_not_found(exc2):
+                            last_exc = exc2
+                            continue
+                        raise
+                if self._is_not_found(exc):
+                    last_exc = exc
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
+        raise ValueError("Gemini response contained no text")
+
+    def _generate_with_model(self, model_name: str, prompt: str, use_mime: bool) -> str:
+        model = self._genai.GenerativeModel(model_name)
+        if use_mime:
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": self.response_mime_type},
+            )
+        else:
+            response = model.generate_content(prompt)
         if hasattr(response, "text") and response.text:
             return response.text
         raise ValueError("Gemini response contained no text")
+
+    def _is_not_found(self, exc: Exception) -> bool:
+        return isinstance(exc, self._exceptions.NotFound) or "not found" in str(exc).lower()
+
+    def _is_mime_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "response_mime_type" in text or "mime" in text
 
 
 @dataclass

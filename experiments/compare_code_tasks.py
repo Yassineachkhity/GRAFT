@@ -28,7 +28,7 @@ from graft.planner import GeminiLLMClient, LocalLLMPlanner
 from graft.training import EpisodeMetrics, GRAFTTrainer
 
 
-def load_api_key() -> str:
+def load_gemini_config() -> tuple[str, str]:
     env_path = Path(__file__).resolve().parents[1] / ".env"
     load_dotenv(env_path)
     api_key = os.getenv("GEMINI_API_KEY")
@@ -36,7 +36,8 @@ def load_api_key() -> str:
         raise RuntimeError(
             "GEMINI_API_KEY not set. Copy .env.example to .env and add your key."
         )
-    return api_key
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    return api_key, model
 
 
 def write_metrics(path: Path, metrics: List[EpisodeMetrics]) -> None:
@@ -79,8 +80,8 @@ def run_config(label: str, agent_assignments: List[int], agent_count: int) -> Li
     task_spec, tasks, dependencies = build_code_task_suite(agent_assignments, agent_count)
     env = CodeTaskEnv(task_spec=task_spec, tasks=tasks, dependencies=dependencies, max_steps=40, seed=7)
 
-    api_key = load_api_key()
-    client = GeminiLLMClient(api_key=api_key, model="gemini-1.5-flash")
+    api_key, model = load_gemini_config()
+    client = GeminiLLMClient(api_key=api_key, model=model)
     planner = LocalLLMPlanner(client=client, ensemble_size=3)
     bandit = Exp3Bandit(num_arms=planner.ensemble_size, gamma=0.2, seed=7)
 
